@@ -3,8 +3,13 @@
 #include "TCanvas.h"
 #include "TSpectrum.h"
 
+//#define WALKCORR
+#define PEAKGATE
+
 TProfile* SetCorrAlias(TTree *t, const char* paramToCorr, const char* det, const char* cut);
 void FindPeaks(TTree* t, const char* det, const char* cut, double *&peak, double *&stddev);
+
+const int NumStdDevScans = 2;
 
 void TimingWalkCorr(const char* filename, int chStart, int chLabr) {
 	gStyle->SetOptFit(1111);
@@ -13,31 +18,44 @@ void TimingWalkCorr(const char* filename, int chStart, int chLabr) {
 	TFile *file = new TFile(filename);
 	TTree *t = (TTree*)file->Get("labr3");
 	TCanvas *c = new TCanvas("c","");
-	c->Divide(3,3);
+	int numRows = 0;
+#ifdef WALKCORR
+	numRows += 2;
+#endif
+#ifdef PEAKGATE
+	numRows += 1;
+#endif
+
+	if (numRows == 1) c->Divide(numRows,3);
+	else c->Divide(3,numRows);
+
 
 	std::string locCut = Form("loc_start==%d && loc_labr==%d",chStart,chLabr);
 
 	c->cd(1)->SetGridx();
-	t->Draw("tdiff>>hRaw(500,0,100)",Form("en_start>5000 && %s",locCut.c_str()));
+	t->Draw("tdiff>>hRaw(1000,0,100)",Form("en_start>5000 && %s",locCut.c_str()));
 	TH1F* hRaw;
-	for (int i=0;i<3;i++) {
+	for (int i=0;i<NumStdDevScans;i++) {
 		hRaw = (TH1F*)gROOT->FindObject("hRaw");
-		t->Draw(Form("tdiff>>hRaw(500,%f,%f)",hRaw->GetMean() - 2 * hRaw->GetStdDev(), hRaw->GetMean() + 2 * hRaw->GetStdDev()),Form("en_start>5000 && %s",locCut.c_str()));
+		t->Draw(Form("tdiff>>hRaw(700,%f,%f)",hRaw->GetMean() - 3 * hRaw->GetStdDev(), hRaw->GetMean() + 3 * hRaw->GetStdDev()),Form("en_start>5000 && %s",locCut.c_str()));
 	}
 	hRaw = (TH1F*)gROOT->FindObject("hRaw");
 	hRaw->Fit("gaus");
 	c->Update();
-/*
+
+#ifdef WALKCORR
+	
 	c->cd(2)->SetGridy();
 	SetCorrAlias(t,"tdiff", "start", locCut.c_str());
 	c->Update();
 	c->cd(3)->SetGridy();
 	t->Draw("tdiff_startCorr:en_start>>hStart(200,0,30000,200,0,100)",Form("en_start>1000 && %s",locCut.c_str()),"GOFF");
 	TH2F* h;
-	for (int i=0;i<3;i++) {
+	for (int i=0;i<NumStdDevScans;i++) {
 		h = (TH2F*) gROOT->FindObject("hStart");
 		t->Draw(Form("tdiff_startCorr:en_start>>hStart(200,0,30000,200,%f,%f)",h->GetMean(2) - 3 * h->GetStdDev(2),h->GetMean(2) + 3 * h->GetStdDev(2)),Form("en_start>1000 && %s",locCut.c_str()),"GOFF");
 	}
+	h = (TH2F*) gROOT->FindObject("hStart");
 	h->SetMinimum(1);
 	h->Draw("COLZ");
 	c->Update();
@@ -48,52 +66,92 @@ void TimingWalkCorr(const char* filename, int chStart, int chLabr) {
 	c->Update();
 	c->cd(6)->SetGridy();
 	t->Draw("tdiff_startCorr_labrCorr:en_labr>>hLabr(200,0,30000,200,0,100)",Form("en_start>1000 && %s",locCut.c_str()),"GOFF");
-	for (int i=0;i<4;i++) {
+	for (int i=0;i<NumStdDevScans;i++) {
 		h = (TH2F*) gROOT->FindObject("hLabr");
 		t->Draw(Form("tdiff_startCorr_labrCorr:en_labr>>hLabr(200,0,30000,200,%f,%f)",h->GetMean(2) - 3 * h->GetStdDev(2),h->GetMean(2) + 3 * h->GetStdDev(2)),Form("en_start>1000 && %s",locCut.c_str()),"GOFF");
 	}
+	h = (TH2F*) gROOT->FindObject("hLabr");
 	h->SetMinimum(0);
 	h->Draw("COLZ");
 	c->Update();
 
 	c->cd(4)->SetGridx();
-	t->Draw("tdiff_startCorr_labrCorr>>hCorr(500,0,100)",Form("en_start>5000 && %s",locCut.c_str()));
 	TH1F* hCorr;
-	for (int i=0;i<3;i++) {
+	/*
+	t->Draw("tdiff_startCorr_labrCorr>>hCorr(500,0,100)",Form("en_start>5000 && en_labr>5000 && %s",locCut.c_str()));
+   for (int i=0;i<NumStdDevScans;i++) {
 		hCorr = (TH1F*)gROOT->FindObject("hCorr");
 		t->Draw(Form("tdiff_startCorr_labrCorr>>hCorr(500,%f,%f)",hCorr->GetMean() - 3 * hCorr->GetStdDev(), hCorr->GetMean() + 3 * hCorr->GetStdDev()),Form("en_start>5000 && en_labr>5000 && %s",locCut.c_str()));
 	}
+	*/
+	t->Draw(Form("tdiff_startCorr_labrCorr>>hCorr(700,%f,%f)",hRaw->GetXaxis()->GetXmin(), hRaw->GetXaxis()->GetXmax()),Form("en_start>5000 && en_labr>5000 && %s",locCut.c_str()));
 	hCorr = (TH1F*)gROOT->FindObject("hCorr");
 	TF1 *f = new TF1("gausFit","gaus",hCorr->GetMean() - hCorr->GetStdDev(), hCorr->GetMean() + hCorr->GetStdDev());
-	hCorr->Fit(f,"RME");
+	hCorr->Fit(f,"ME");
 	c->Update();
-*/
+#endif
 
-	c->cd(8);
+#ifdef PEAKGATE
+	c->cd(3*numRows - 1);
 	double *peaks, *stddev;
 	FindPeaks(t,"start",Form("loc_start==%d",chStart),peaks,stddev);
 	c->Update();
 	
 
-	c->cd(9);
+	c->cd(3*numRows);
 	double *peaks_labr, *stddev_labr;
 	FindPeaks(t,"labr",Form("loc_labr==%d",chLabr),peaks_labr,stddev_labr);
 	c->Update();
 
-	c->cd(7);
-	t->Draw("tdiff>>hCorr2(50,-100,100)",Form("en_start>5000 && %s && en_start> %f && en_start < %f",locCut.c_str(),peaks[0]-stddev[0],peaks[0]+stddev[0]));
-	TH1F* hCorr2;
-	for (int i=0;i<1;i++) {
-		hCorr2 = (TH1F*)gROOT->FindObject("hCorr2");
-		t->Draw(Form("tdiff>>hCorr2(200,%f,%f)",hRaw->GetMean() - 5 * hRaw->GetStdDev(), hRaw->GetMean() + 5 * hRaw->GetStdDev()),Form("en_start>5000 && %s && en_start> %f && en_start < %f",locCut.c_str(),peaks[0]-2*stddev[0],peaks[0]+2*stddev[0]),"GOFF");
+	c->cd(3*numRows - 2);
+	const char *cut1 = Form("en_start > %f && en_start < %f && en_labr > %f && en_labr < %f",
+		peaks[0] - 2 * stddev[0], peaks[0] + 2 * stddev[0],
+		peaks_labr[1] - 2 * stddev_labr[1], peaks_labr[1] + 2 * stddev_labr[1]);
+	const char *cut2 = Form("en_start > %f && en_start < %f && en_labr > %f && en_labr < %f",
+		peaks[1] - 2 * stddev[1], peaks[1] + 2 * stddev[1],
+		peaks_labr[0] - 2 * stddev_labr[0], peaks_labr[0] + 2 * stddev_labr[0]);
+	TH1F *hCorr2_1, *hCorr2_2;
+	/*
+	t->Draw("tdiff>>hCorr2_1(50,-100,100)",Form("%s && %s",locCut.c_str(),cut1));
+	t->Draw("tdiff>>hCorr2_2(50,-100,100)",Form("%s && %s",locCut.c_str(),cut2));
+	for (int i=0;i<NumStdDevScans;i++) {
+		hCorr2_1 = (TH1F*)gROOT->FindObject("hCorr2_1");
+		t->Draw(Form("tdiff>>hCorr2_1(200,%f,%f)",hRaw->GetMean() - 5 * hRaw->GetStdDev(), hRaw->GetMean() + 5 * hRaw->GetStdDev()),Form("%s && %s",locCut.c_str(),cut1),"GOFF");
+
+		hCorr2_2 = (TH1F*)gROOT->FindObject("hCorr2_2");
+		t->Draw(Form("tdiff>>hCorr2_2(200,%f,%f)",hRaw->GetMean() - 5 * hRaw->GetStdDev(), hRaw->GetMean() + 5 * hRaw->GetStdDev()),Form("%s && %s",locCut.c_str(),cut2),"GOFF");
 	}
-	hCorr2 = (TH1F*)gROOT->FindObject("hCorr2");
-	TF1 *f2 = new TF1("gausFit","gaus",hCorr2->GetMean() - hCorr2->GetStdDev(), hCorr2->GetMean() + hCorr2->GetStdDev());
-	hCorr2->Fit(f2,"RME");
+	*/
+#ifdef WALKCORR
+	const char *tdiffString = "tdiff_startCorr_labrCorr";
+#else
+	const char *tdiffString = "tdiff";
+#endif
+//	t->Draw(Form("%s>>hCorr2_1(1000,-20,20)",tdiffString),Form("%s && %s",locCut.c_str(),cut1),"GOFF");
+//	t->Draw(Form("%s>>hCorr2_2(1000,-20,20)",tdiffString),Form("%s && %s",locCut.c_str(),cut2),"GOFF");
+	t->Draw(Form("%s>>hCorr2_1(200,%f,%f)",tdiffString,hRaw->GetMean()-2,hRaw->GetMean()+2),Form("%s && %s",locCut.c_str(),cut1),"GOFF");
+	t->Draw(Form("%s>>hCorr2_2(200,%f,%f)",tdiffString,hRaw->GetMean()-2,hRaw->GetMean()+2),Form("%s && %s",locCut.c_str(),cut2),"GOFF");
+	hCorr2_1 = (TH1F*)gROOT->FindObject("hCorr2_1");
+	hCorr2_2 = (TH1F*)gROOT->FindObject("hCorr2_2");
+	TF1 *f2_1 = new TF1("gausFit","gaus",hCorr2_1->GetMean() - hCorr2_1->GetStdDev(), hCorr2_1->GetMean() + hCorr2_1->GetStdDev());
+	f2_1->SetLineColor(kBlue);
+	hCorr2_1->Fit(f2_1,"ME");
+	TF1 *f2_2 = new TF1("gausFit","gaus",hCorr2_2->GetMean() - hCorr2_2->GetStdDev(), hCorr2_2->GetMean() + hCorr2_2->GetStdDev());
+	hCorr2_2->Fit(f2_2,"ME");
+	c->Update();
+	TPaveStats* stats = (TPaveStats*) hCorr2_2->GetListOfFunctions()->FindObject("stats");
+	if (stats) {
+		float boxHeight = stats->GetY2NDC() - stats->GetY1NDC();
+		stats->SetY2NDC(stats->GetY1NDC() - 0.01);
+		stats->SetY1NDC(stats->GetY2NDC() - boxHeight);
+	}
+
+	hCorr2_1->Draw("SAMES");
+	hCorr2_2->SetLineColor(kRed);
 
 	
 	c->Update();
-
+#endif
 }
 
 void FindPeaks(TTree *t, const char* det,const char* cut, double *&peaks, double *&stddev) {
@@ -104,19 +162,32 @@ void FindPeaks(TTree *t, const char* det,const char* cut, double *&peaks, double
 
 	s->Search(hist,2);
 
-	float highEn, lowEn;
+	double highEn, lowEn;
+	double highEnHeight, lowEnHeight;
 	bool found = false;
 	for (int i=0;i<s->GetNPeaks();i++) {
 		for (int j=0;j<s->GetNPeaks();j++) {
+			printf("%d %d %f %f %f %f %f\n",i,j,s->GetPositionX()[i],s->GetPositionY()[i],s->GetPositionX()[j], s->GetPositionY()[j], (s->GetPositionX()[i]/s->GetPositionX()[j]/1.136) -1);
 			if (i==j) continue;
-			if (fabs((s->GetPositionX()[i] / s->GetPositionX()[j] / 1.136 ) - 1) < 0.02) {
+			if (fabs((s->GetPositionX()[i] / s->GetPositionX()[j] / 1.136 ) - 1) < 0.03 && s->GetPositionY()[i] < s->GetPositionY()[j]) {
+				printf("Found Correct Ratio\n");
 				if (found) {
-					printf("WARNING: Ambiguous Co60 Peaks!\n");
-					break;
+					if (s->GetPositionY()[i] >= highEnHeight || s->GetPositionY()[j] >= lowEnHeight) {
+						printf("Resetting Values!\n");
+						highEn = s->GetPositionX()[i];
+						highEnHeight = s->GetPositionY()[i];
+						lowEn = s->GetPositionX()[j];
+						lowEnHeight = s->GetPositionY()[j];
+					}
 				}
-				found = true;
-				highEn = s->GetPositionX()[i];
-				lowEn = s->GetPositionX()[j];
+				else {
+					printf("Setting Values!\n");
+					found = true;
+					highEn = s->GetPositionX()[i];
+					highEnHeight = s->GetPositionY()[i];
+					lowEn = s->GetPositionX()[j];
+					lowEnHeight = s->GetPositionY()[j];
+				}
 			}
 		}
 	}
@@ -141,9 +212,9 @@ void FindPeaks(TTree *t, const char* det,const char* cut, double *&peaks, double
 
 TProfile* SetCorrAlias(TTree *t, const char* paramToCorr, const char* det, const char* cut) {
 	//t->Draw(Form("%s:en_%s>>(200,0,1,200,0,1)",paramToCorr,det),"en_start>1000","GOFF");
-	t->Draw(Form("%s:en_%s>>hWalkCorr_%s(100,0,30000,200,0,100)",paramToCorr,det,det),Form("en_start>1000 && %s",cut),"COLZ");
+	t->Draw(Form("%s:en_%s>>hWalkCorr_%s(100,0,30000,400,-100,100)",paramToCorr,det,det),Form("en_start>1000 && %s",cut),"COLZ");
 	TH2F *h;
-	for (int i=0;i<3;i++) {
+	for (int i=0;i<NumStdDevScans;i++) {
 		h = (TH2F*) gROOT->FindObject(Form("hWalkCorr_%s",det));
 		t->Draw(Form("%s:en_%s>>hWalkCorr_%s(100,0,30000,200,%f,%f)",paramToCorr,det,det,h->GetMean(2) - 3 * h->GetStdDev(2),h->GetMean(2) + 3 * h->GetStdDev(2)),Form("en_start>1000 && %s",cut),"COLZ");
 	}
